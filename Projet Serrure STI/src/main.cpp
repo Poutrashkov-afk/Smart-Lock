@@ -1,28 +1,38 @@
 #include <SoftwareSerial.h>
-SoftwareSerial RFID(2, 3);
-
+#include <wire.h>
+#include "rgb_lcd.h"
+#include <Arduino.h>
 #include "Adafruit_NeoPixel.h"
 #ifdef __AVR__
   #include <avr/power.h>
 #endif
-
 #define PIN 6
 #define NUMPIXELS 10
+void updateLEDs();
+void readTags();
 void setALLpixels(uint8_t r, uint8_t g, uint8_t b);
 Adafruit_NeoPixel pixels = Adafruit_NeoPixel(NUMPIXELS, PIN, NEO_GRB + NEO_KHZ800);
+rgb_lcd lcd;
+const int Red = 255;
+const int Green = 255;
+const int Blue = 255;
+SoftwareSerial RFID(2, 3);
 
 // --- Timing ---
+
 unsigned long previousMillis = 0;
 unsigned long stateStartMillis = 0;
 const unsigned long LED_INTERVAL = 50;
-const unsigned long STATE_DURATION = 1500;
+const unsigned long STATE_DURATION = 5000;
 
 // --- State Machine ---
+
 enum LedState { IDLE_STATE, ACCEPTED_STATE, REFUSED_STATE };
 LedState currentState = IDLE_STATE;
 int currentPixel = 0;
 
 // --- RFID ---
+
 int yes = 13;
 int no = 12;
 
@@ -30,6 +40,7 @@ int tag[14] = {254,254,254,254,254,254,254,254,254,254,254,254,254,254};
 int newtag[14] = {0};
 
 // --- Debug ---
+
 unsigned long scanCount = 0;
 
 void setup()
@@ -37,6 +48,12 @@ void setup()
 #if defined(__AVR_ATtiny85__)
   if (F_CPU == 16000000) clock_prescale_set(clock_div_1);
 #endif
+
+  lcd.begin(16, 2);
+  lcd.setRGB(255, 128, 0);
+  lcd.setCursor(1, 0);
+  lcd.display();
+  lcd.print("Serrure fermee");
 
   pixels.setBrightness(25);
   pixels.begin();
@@ -47,7 +64,7 @@ void setup()
   pinMode(yes, OUTPUT);
   pinMode(no, OUTPUT);
 
-  setAllPixels(255, 128, 0);
+  setALLpixels(255, 128, 0);
   pixels.show();
 
   Serial.println(F("=========================="));
@@ -69,7 +86,7 @@ void setup()
 }
 
 // ===================== HELPERS =====================
-void setAllPixels(uint8_t r, uint8_t g, uint8_t b)
+void setALLpixels(uint8_t r, uint8_t g, uint8_t b)
 {
   for (int i = 0; i < NUMPIXELS; i++)
     pixels.setPixelColor(i, pixels.Color(r, g, b));
@@ -185,13 +202,24 @@ void updateLEDs()
   switch (currentState)
   {
     case IDLE_STATE:
-      setAllPixels(255, 128, 0);
+    lcd.begin(16, 2);
+    lcd.setRGB(255, 128, 0);
+    lcd.setCursor(1, 0);
+    lcd.display();
+    lcd.print("Serrure Fermee");
+      setALLpixels(255, 128, 0);
       pixels.show();
       break;
 
     case ACCEPTED_STATE:
       if (currentPixel < NUMPIXELS && (now - previousMillis >= LED_INTERVAL))
       {
+        lcd.clear();
+        lcd.begin(16, 2);
+        lcd.setRGB(0, 255, 0);
+        lcd.setCursor(1, 0);
+        lcd.display();
+        lcd.print("Serrure Ouverte");
         pixels.setPixelColor(currentPixel, pixels.Color(0, 255, 0));
         pixels.show();
         Serial.print(F("  LED "));
@@ -213,6 +241,12 @@ void updateLEDs()
     case REFUSED_STATE:
       if (currentPixel < NUMPIXELS && (now - previousMillis >= LED_INTERVAL))
       {
+        lcd.clear();
+        lcd.begin(16, 2);
+        lcd.setRGB(255, 0, 0);
+        lcd.setCursor(1, 0);
+        lcd.display();
+        lcd.print("Acces Refuse");
         pixels.setPixelColor(currentPixel, pixels.Color(255, 0, 0));
         pixels.show();
         Serial.print(F("  LED "));
