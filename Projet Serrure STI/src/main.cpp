@@ -1,3 +1,5 @@
+// --- Libraries ---
+
 #include <SoftwareSerial.h>
 #include <wire.h>
 #include "rgb_lcd.h"
@@ -6,11 +8,19 @@
 #ifdef __AVR__
   #include <avr/power.h>
 #endif
+
+// --- Pins ---
+
 #define PIN 6
 #define NUMPIXELS 10
+
+// --- Functions ---
+
 void updateLEDs();
 void readTags();
 void setALLpixels(uint8_t r, uint8_t g, uint8_t b);
+
+// --- Objects ---
 Adafruit_NeoPixel pixels = Adafruit_NeoPixel(NUMPIXELS, PIN, NEO_GRB + NEO_KHZ800);
 rgb_lcd lcd;
 const int Red = 255;
