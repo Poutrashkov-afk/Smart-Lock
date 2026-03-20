@@ -42,7 +42,7 @@ const unsigned long STATE_DURATION = 5000;
 
 enum LedState { IDLE_STATE, ACCEPTED_STATE, REFUSED_STATE };
 LedState currentState = IDLE_STATE;
-bool stateJustChanged = false;  // Flag pour savoir si on vient de changer d'état
+bool stateJustChanged = true;
 
 // --- RFID ---
 
@@ -89,7 +89,6 @@ void setup()
   Serial.println(F("En attente de la carte RFID..."));
   Serial.println(F("--------------------------"));
 
-  // Print the stored tag for reference
   Serial.print(F("Stored tag: ["));
   for (int i = 0; i < 14; i++)
   {
@@ -98,6 +97,8 @@ void setup()
   }
   Serial.println(F("]"));
   Serial.println(F("--------------------------"));
+
+  stateJustChanged = false;
 }
 
 // ===================== HELPERS =====================
@@ -140,7 +141,6 @@ void readTags()
   for (int z = 0; z < 14; z++)
     newtag[z] = RFID.read();
 
-  // Print raw tag data
   Serial.print(F("  Raw tag: ["));
   for (int i = 0; i < 14; i++)
   {
@@ -149,7 +149,6 @@ void readTags()
   }
   Serial.println(F("]"));
 
-  // Print tag as HEX
   Serial.print(F("  Hex tag: ["));
   for (int i = 0; i < 14; i++)
   {
@@ -159,7 +158,6 @@ void readTags()
   }
   Serial.println(F("]"));
 
-  // Print tag as ASCII (printable chars only)
   Serial.print(F("  ASCII:   ["));
   for (int i = 0; i < 14; i++)
   {
@@ -170,7 +168,6 @@ void readTags()
   }
   Serial.println(F("]"));
 
-  // Drain leftover bytes
   int flushed = 0;
   while (RFID.available())
   {
@@ -183,7 +180,6 @@ void readTags()
     Serial.println(flushed);
   }
 
-  // Compare
   Serial.println(F("  Comparaison avec la carte acceptée..."));
 
   digitalWrite(yes, LOW);
@@ -194,7 +190,7 @@ void readTags()
     Serial.println(F("  >> RESULTAT: ACCEPTE <<"));
     Serial.println(F("  Etat: IDLE -> ACCEPTE"));
     currentState = ACCEPTED_STATE;
-    stateJustChanged = true;  // Marquer le changement d'état
+    stateJustChanged = true;
     digitalWrite(yes, HIGH);
   }
   else
@@ -202,7 +198,7 @@ void readTags()
     Serial.println(F("  >> RESULTAT: REJETE <<"));
     Serial.println(F("  Etat: IDLE -> REFUSE"));
     currentState = REFUSED_STATE;
-    stateJustChanged = true;  // Marquer le changement d'état
+    stateJustChanged = true;
     digitalWrite(no, HIGH);
   }
 
@@ -220,17 +216,23 @@ void updateLEDs()
   switch (currentState)
   {
     case IDLE_STATE:
-      lcd.begin(16, 2);
-      lcd.setRGB(255, 128, 0);
-      lcd.setCursor(1, 0);
-      lcd.display();
-      lcd.print("Serrure Fermee");
-      setALLpixels(255, 128, 0);
-      pixels.show();
+      if (stateJustChanged)
+      {
+        lcd.clear();
+        lcd.begin(16, 2);
+        lcd.setRGB(255, 128, 0);
+        lcd.setCursor(1, 0);
+        lcd.display();
+        lcd.print("Serrure Fermee");
+
+        setALLpixels(255, 128, 0);
+        pixels.show();
+
+        stateJustChanged = false;
+      }
       break;
 
     case ACCEPTED_STATE:
-      // Exécuter une seule fois au changement d'état
       if (stateJustChanged)
       {
         lcd.clear();
@@ -239,18 +241,16 @@ void updateLEDs()
         lcd.setCursor(1, 0);
         lcd.display();
         lcd.print("Serrure Ouverte");
-        
-        // Toutes les LEDs en vert immédiatement
+
         setALLpixels(0, 255, 0);
         pixels.show();
-        
+
         Serial.println(F("  Toutes les LEDs -> GREEN"));
-        
+
         ouverture();
-        stateJustChanged = false;  // Reset du flag
+        stateJustChanged = false;
       }
-      
-      // Vérifier si le temps est écoulé
+
       if (now - stateStartMillis >= STATE_DURATION)
       {
         Serial.println(F("  Etat: ACCEPTE -> IDLE"));
@@ -259,11 +259,11 @@ void updateLEDs()
         digitalWrite(yes, LOW);
         fermeture();
         currentState = IDLE_STATE;
+        stateJustChanged = true;
       }
       break;
 
     case REFUSED_STATE:
-      // Exécuter une seule fois au changement d'état
       if (stateJustChanged)
       {
         lcd.clear();
@@ -272,18 +272,16 @@ void updateLEDs()
         lcd.setCursor(1, 0);
         lcd.display();
         lcd.print("Acces Refuse");
-        
-        // Toutes les LEDs en rouge immédiatement
+
         setALLpixels(255, 0, 0);
         pixels.show();
-        
+
         Serial.println(F("  Toutes les LEDs -> RED"));
-        
+
         Motor.speed(MOTOR1, 0);
-        stateJustChanged = false;  // Reset du flag
+        stateJustChanged = false;
       }
-      
-      // Vérifier si le temps est écoulé
+
       if (now - stateStartMillis >= STATE_DURATION)
       {
         Serial.println(F("  Etat: REFUSE -> IDLE"));
@@ -291,6 +289,7 @@ void updateLEDs()
         Serial.println(F("--------------------------"));
         digitalWrite(no, LOW);
         currentState = IDLE_STATE;
+        stateJustChanged = true;
       }
       break;
   }
@@ -313,6 +312,7 @@ void fermeture()
 }
 
 // ===================== LOOP =====================
+
 void loop()
 {
   readTags();
