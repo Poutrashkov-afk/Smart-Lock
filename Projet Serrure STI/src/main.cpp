@@ -5,22 +5,27 @@
 #include "rgb_lcd.h"
 #include <Arduino.h>
 #include "Adafruit_NeoPixel.h"
+#include "Grove_I2C_Motor_Driver.h"
 #ifdef __AVR__
   #include <avr/power.h>
 #endif
 
 // --- Pins ---
 
+#define I2C_ADDRESS 0x0f
 #define PIN 6
 #define NUMPIXELS 10
 
 // --- Functions ---
 
+void ouverture();
+void fermeture();
 void updateLEDs();
 void readTags();
 void setALLpixels(uint8_t r, uint8_t g, uint8_t b);
 
 // --- Objects ---
+
 Adafruit_NeoPixel pixels = Adafruit_NeoPixel(NUMPIXELS, PIN, NEO_GRB + NEO_KHZ800);
 rgb_lcd lcd;
 const int Red = 255;
@@ -30,16 +35,14 @@ SoftwareSerial RFID(2, 3);
 
 // --- Timing ---
 
-unsigned long previousMillis = 0;
 unsigned long stateStartMillis = 0;
-const unsigned long LED_INTERVAL = 50;
 const unsigned long STATE_DURATION = 5000;
 
 // --- State Machine ---
 
 enum LedState { IDLE_STATE, ACCEPTED_STATE, REFUSED_STATE };
 LedState currentState = IDLE_STATE;
-int currentPixel = 0;
+bool stateJustChanged = false;  // Flag pour savoir si on vient de changer d'état
 
 // --- RFID ---
 
@@ -58,6 +61,8 @@ void setup()
 #if defined(__AVR_ATtiny85__)
   if (F_CPU == 16000000) clock_prescale_set(clock_div_1);
 #endif
+
+  Motor.begin(I2C_ADDRESS);
 
   lcd.begin(16, 2);
   lcd.setRGB(255, 128, 0);
@@ -96,6 +101,7 @@ void setup()
 }
 
 // ===================== HELPERS =====================
+
 void setALLpixels(uint8_t r, uint8_t g, uint8_t b)
 {
   for (int i = 0; i < NUMPIXELS; i++)
@@ -118,6 +124,7 @@ boolean comparetag(int aa[], int bb[])
 }
 
 // ===================== RFID =====================
+
 void readTags()
 {
   if (RFID.available() < 14) return;
@@ -187,6 +194,7 @@ void readTags()
     Serial.println(F("  >> RESULTAT: ACCEPTE <<"));
     Serial.println(F("  Etat: IDLE -> ACCEPTE"));
     currentState = ACCEPTED_STATE;
+    stateJustChanged = true;  // Marquer le changement d'état
     digitalWrite(yes, HIGH);
   }
   else
@@ -194,17 +202,17 @@ void readTags()
     Serial.println(F("  >> RESULTAT: REJETE <<"));
     Serial.println(F("  Etat: IDLE -> REFUSE"));
     currentState = REFUSED_STATE;
+    stateJustChanged = true;  // Marquer le changement d'état
     digitalWrite(no, HIGH);
   }
 
   Serial.println(F("--------------------------"));
 
-  currentPixel = 0;
   stateStartMillis = millis();
-  previousMillis = millis();
 }
 
 // ===================== LEDs =====================
+
 void updateLEDs()
 {
   unsigned long now = millis();
@@ -212,17 +220,18 @@ void updateLEDs()
   switch (currentState)
   {
     case IDLE_STATE:
-    lcd.begin(16, 2);
-    lcd.setRGB(255, 128, 0);
-    lcd.setCursor(1, 0);
-    lcd.display();
-    lcd.print("Serrure Fermee");
+      lcd.begin(16, 2);
+      lcd.setRGB(255, 128, 0);
+      lcd.setCursor(1, 0);
+      lcd.display();
+      lcd.print("Serrure Fermee");
       setALLpixels(255, 128, 0);
       pixels.show();
       break;
 
     case ACCEPTED_STATE:
-      if (currentPixel < NUMPIXELS && (now - previousMillis >= LED_INTERVAL))
+      // Exécuter une seule fois au changement d'état
+      if (stateJustChanged)
       {
         lcd.clear();
         lcd.begin(16, 2);
@@ -230,26 +239,32 @@ void updateLEDs()
         lcd.setCursor(1, 0);
         lcd.display();
         lcd.print("Serrure Ouverte");
-        pixels.setPixelColor(currentPixel, pixels.Color(0, 255, 0));
+        
+        // Toutes les LEDs en vert immédiatement
+        setALLpixels(0, 255, 0);
         pixels.show();
-        Serial.print(F("  LED "));
-        Serial.print(currentPixel);
-        Serial.println(F(" -> GREEN"));
-        currentPixel++;
-        previousMillis = now;
+        
+        Serial.println(F("  Toutes les LEDs -> GREEN"));
+        
+        ouverture();
+        stateJustChanged = false;  // Reset du flag
       }
+      
+      // Vérifier si le temps est écoulé
       if (now - stateStartMillis >= STATE_DURATION)
       {
         Serial.println(F("  Etat: ACCEPTE -> IDLE"));
         Serial.println(F("En attente de la carte RFID..."));
         Serial.println(F("--------------------------"));
         digitalWrite(yes, LOW);
+        fermeture();
         currentState = IDLE_STATE;
       }
       break;
 
     case REFUSED_STATE:
-      if (currentPixel < NUMPIXELS && (now - previousMillis >= LED_INTERVAL))
+      // Exécuter une seule fois au changement d'état
+      if (stateJustChanged)
       {
         lcd.clear();
         lcd.begin(16, 2);
@@ -257,14 +272,18 @@ void updateLEDs()
         lcd.setCursor(1, 0);
         lcd.display();
         lcd.print("Acces Refuse");
-        pixels.setPixelColor(currentPixel, pixels.Color(255, 0, 0));
+        
+        // Toutes les LEDs en rouge immédiatement
+        setALLpixels(255, 0, 0);
         pixels.show();
-        Serial.print(F("  LED "));
-        Serial.print(currentPixel);
-        Serial.println(F(" -> RED"));
-        currentPixel++;
-        previousMillis = now;
+        
+        Serial.println(F("  Toutes les LEDs -> RED"));
+        
+        Motor.speed(MOTOR1, 0);
+        stateJustChanged = false;  // Reset du flag
       }
+      
+      // Vérifier si le temps est écoulé
       if (now - stateStartMillis >= STATE_DURATION)
       {
         Serial.println(F("  Etat: REFUSE -> IDLE"));
@@ -275,6 +294,22 @@ void updateLEDs()
       }
       break;
   }
+}
+
+// ===================== MOTOR =====================
+
+void ouverture()
+{
+  Motor.speed(MOTOR1, 255);
+  delay(2000);
+  Motor.speed(MOTOR1, 0);
+}
+
+void fermeture()
+{
+  Motor.speed(MOTOR1, -255);
+  delay(2000);
+  Motor.speed(MOTOR1, 0);
 }
 
 // ===================== LOOP =====================
