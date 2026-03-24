@@ -1,0 +1,203 @@
+Explication du code - Serrure RFID Intelligente 🔐
+Ce code contrôle une serrure automatique qui s'ouvre avec une carte RFID (comme un badge d'accès).
+
+1. Les bibliothèques (les outils importés)
+C++
+
+#include <SoftwareSerial.h>    // Communication série pour le lecteur RFID
+#include <wire.h>              // Communication I2C (écran LCD + moteur)
+#include "rgb_lcd.h"           // Contrôle de l'écran LCD coloré
+#include "Adafruit_NeoPixel.h" // Contrôle des LEDs colorées (NeoPixel)
+#include "Grove_I2C_Motor_Driver.h" // Contrôle du moteur
+💡 Analogie : Ce sont comme des "boîtes à outils" qu'on importe pour utiliser chaque composant.
+
+2. Les définitions et variables
+C++
+
+#define PIN 6          // Les LEDs sont branchées sur la broche 6
+#define NUMPIXELS 10   // On a 10 LEDs
+
+SoftwareSerial RFID(2, 3);  // Le lecteur RFID est sur les broches 2 et 3
+Le tag de référence (la "bonne" carte)
+C++
+
+int tag[14] = {254,254,254,254,254,254,254,254,254,254,254,254,254,254};
+int newtag[14] = {0};  // Stocke la carte qu'on vient de scanner
+🔑 tag = le code de la carte autorisée
+newtag = le code de la carte qu'on présente
+
+3. La machine à états
+C'est le cœur du programme. Il y a 3 états possibles :
+
+text
+
+┌─────────────────────────────────────────────────┐
+│                                                 │
+│   ┌──────────┐                                  │
+│   │   IDLE   │  ← En attente d'une carte       │
+│   │ (Orange) │                                  │
+│   └────┬─────┘                                  │
+│        │                                        │
+│        │ Carte détectée                         │
+│        ├──────────────────┐                     │
+│        ▼                  ▼                     │
+│  ┌───────────┐     ┌───────────┐               │
+│  │ ACCEPTED  │     │ REFUSED   │               │
+│  │  (Vert)   │     │  (Rouge)  │               │
+│  │ Ouvre la  │     │ Reste     │               │
+│  │ serrure   │     │ fermé     │               │
+│  └─────┬─────┘     └─────┬─────┘               │
+│        │                  │                     │
+│        │ Après 5 sec      │ Après 5 sec         │
+│        └──────────────────┘                     │
+│                  │                              │
+│                  ▼                              │
+│          Retour à IDLE                          │
+│                                                 │
+└─────────────────────────────────────────────────┘
+C++
+
+enum LedState { IDLE_STATE, ACCEPTED_STATE, REFUSED_STATE };
+4. Le setup() - L'initialisation
+C++
+
+void setup()
+{
+  Motor.begin(I2C_ADDRESS);     // Démarre le moteur
+
+  lcd.begin(16, 2);             // Démarre l'écran (16 colonnes, 2 lignes)
+  lcd.setRGB(255, 128, 0);      // Couleur orange
+  lcd.print("Serrure fermee");  // Affiche le texte
+
+  pixels.begin();               // Démarre les LEDs
+  setALLpixels(255, 128, 0);    // LEDs en orange
+
+  RFID.begin(9600);             // Démarre le lecteur RFID
+  Serial.begin(9600);           // Démarre le moniteur série (debug)
+}
+🏁 Cette fonction s'exécute une seule fois au démarrage.
+
+5. La lecture RFID - readTags()
+C++
+
+void readTags()
+{
+  // 1. Vérifie si une carte est présente
+  if (RFID.available() < 14) return;  // Pas assez de données → on sort
+
+  // 2. Lit les 14 octets de la carte
+  for (int z = 0; z < 14; z++)
+    newtag[z] = RFID.read();
+
+  // 3. Compare avec la carte autorisée
+  if (comparetag(newtag, tag))
+  {
+    // ✅ CARTE ACCEPTÉE
+    currentState = ACCEPTED_STATE;
+    digitalWrite(yes, HIGH);       // Allume la LED verte physique
+  }
+  else
+  {
+    // ❌ CARTE REFUSÉE
+    currentState = REFUSED_STATE;
+    digitalWrite(no, HIGH);        // Allume la LED rouge physique
+  }
+}
+La comparaison des cartes
+C++
+
+boolean comparetag(int aa[], int bb[])
+{
+  int matchCount = 0;
+  for (int i = 0; i < 14; i++)
+  {
+    if (aa[i] == bb[i]) matchCount++;  // Compte les octets identiques
+  }
+  return (matchCount == 14);  // Les 14 doivent correspondre !
+}
+📊 C'est comme comparer deux codes PIN chiffre par chiffre.
+
+6. La mise à jour de l'affichage - updateLEDs()
+Cette fonction gère ce qui se passe dans chaque état :
+
+text
+
+┌─────────────┬──────────────────┬──────────────┬──────────────┐
+│    État      │   Écran LCD      │    LEDs      │   Moteur     │
+├─────────────┼──────────────────┼──────────────┼──────────────┤
+│   IDLE       │ "Serrure Fermee" │   Orange     │   Arrêté     │
+│   ACCEPTED   │ "Serrure Ouverte"│   Vert       │   Ouvre      │
+│   REFUSED    │ "Acces Refuse"   │   Rouge      │   Arrêté     │
+└─────────────┴──────────────────┴──────────────┴──────────────┘
+Après 5 secondes, on revient automatiquement à IDLE :
+
+C++
+
+const unsigned long STATE_DURATION = 5000;  // 5000 ms = 5 secondes
+
+if (now - stateStartMillis >= STATE_DURATION)
+{
+  currentState = IDLE_STATE;  // Retour à l'attente
+}
+7. Le moteur - Ouverture/Fermeture
+C++
+
+void ouverture()
+{
+  Motor.speed(MOTOR1, 255);   // Tourne dans un sens (ouvre)
+  delay(2000);                // Pendant 2 secondes
+  Motor.speed(MOTOR1, 0);     // S'arrête
+}
+
+void fermeture()
+{
+  Motor.speed(MOTOR1, -255);  // Tourne dans l'autre sens (ferme)
+  delay(2000);                // Pendant 2 secondes
+  Motor.speed(MOTOR1, 0);     // S'arrête
+}
+8. La boucle principale - loop()
+C++
+
+void loop()
+{
+  readTags();    // 1. Vérifie si une carte est présentée
+  updateLEDs();  // 2. Met à jour l'écran, les LEDs et le moteur
+}
+🔄 Cette boucle tourne en permanence, des centaines de fois par seconde.
+
+Résumé du fonctionnement
+text
+
+Démarrage
+    │
+    ▼
+┌─────────────────────┐
+│  Écran orange        │
+│  "Serrure Fermee"    │◄─────────────────────┐
+│  Attente de carte... │                      │
+└─────────┬───────────┘                      │
+          │ Carte détectée                    │
+          ▼                                   │
+    Bonne carte ?                             │
+     /        \                               │
+   OUI        NON                             │
+    │          │                               │
+    ▼          ▼                               │
+ Vert 🟢    Rouge 🔴                          │
+ Moteur     "Accès                            │
+ ouvre      Refusé"                           │
+    │          │                               │
+    │  5 sec   │  5 sec                        │
+    │          │                               │
+    ▼          ▼                               │
+ Moteur     ───────────────────────────────────┘
+ ferme          Retour à l'état initial
+    │
+    └──────────────────────────────────────────┘
+L'essentiel à retenir : le programme boucle en permanence, vérifie si un badge est présenté, le compare au badge autorisé, puis agit en conséquence pendant 5 secondes avant de revenir à l'état d'attente.
+
+
+
+
+
+
